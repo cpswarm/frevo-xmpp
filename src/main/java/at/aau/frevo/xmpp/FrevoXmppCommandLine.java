@@ -35,7 +35,6 @@ public class FrevoXmppCommandLine {
   protected final static String RESOURCE_OPTION = "r";
   protected final static String CLIENT_ID_OPTION = "cid";
   protected final static String CLIENT_PASSWORD_OPTION = "cp";
-  protected final static String CODE_GENERATION_OPTION = "cg";
 
   protected final static Options options = new Options();
 
@@ -44,7 +43,6 @@ public class FrevoXmppCommandLine {
    */
   static {
     options.addOption(DEBUG_OPTION, "debug", true, "set XMPP debug false");
-    options.addOption(CODE_GENERATION_OPTION, "codeGeneration", true, "set code generation flag");
     options.addOption(BASE_CANDIDATE_FILE_OPTION, "candidateFile", true,
         "base file to use for storing top candidates");
     options.addRequiredOption(DOMAIN_OPTION, "domain", true, "XMPP domain");
@@ -60,16 +58,10 @@ public class FrevoXmppCommandLine {
    * 
    * @param args the arguments
    * @return the resulting {@code FrevoXmppConfiguration} instance
-   * @throws ParseException
+   * @throws ParseException if the arguments cannot be parsed
    */
   public static FrevoXmppConfiguration buildConfiguration(String[] args) throws ParseException {
     var commandLine = new DefaultParser().parse(options, args);
-
-    var codeGenerationEnabled = true;
-    if (commandLine.getOptionValue(CODE_GENERATION_OPTION) != null) {
-      codeGenerationEnabled =
-          Boolean.parseBoolean(commandLine.getOptionValue(CODE_GENERATION_OPTION));
-    }
 
     return new FrevoXmppConfiguration(commandLine.getOptionValue(HOST_OPTION),
         Integer.parseInt(commandLine.getOptionValue(PORT_OPTION)),
@@ -77,7 +69,7 @@ public class FrevoXmppCommandLine {
         commandLine.getOptionValue(CLIENT_ID_OPTION),
         commandLine.getOptionValue(CLIENT_PASSWORD_OPTION),
         Boolean.parseBoolean(commandLine.getOptionValue(DEBUG_OPTION)),
-        commandLine.getOptionValue(BASE_CANDIDATE_FILE_OPTION), codeGenerationEnabled);
+        commandLine.getOptionValue(BASE_CANDIDATE_FILE_OPTION));
   }
 
   /**

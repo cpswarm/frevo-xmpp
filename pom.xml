@@ -84,7 +84,7 @@
 		<dependency>
 			<groupId>eu.cpswarm</groupId>
 			<artifactId>optimization-messages</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
+			<version>3.0.0-bundle</version>
 			<scope>compile</scope>
 		</dependency>
 
@@ -97,7 +97,7 @@
 		</dependency>
 		<dependency>
 			<groupId>at.aau.frevo</groupId>
-			<artifactId>frevo-fully-meshed-net</artifactId>
+			<artifactId>frevo-param-set</artifactId>
 			<version>0.0.1-SNAPSHOT</version>
 			<scope>compile</scope>
 		</dependency>
@@ -110,12 +110,6 @@
 		<dependency>
 			<groupId>at.aau.frevo</groupId>
 			<artifactId>frevo-pool-executor</artifactId>
-			<version>0.0.1-SNAPSHOT</version>
-			<scope>compile</scope>
-		</dependency>
-		<dependency>
-			<groupId>at.aau.frevo</groupId>
-			<artifactId>frevo-cpp-exporter</artifactId>
 			<version>0.0.1-SNAPSHOT</version>
 			<scope>compile</scope>
 		</dependency>

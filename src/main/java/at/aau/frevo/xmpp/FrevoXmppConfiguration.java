@@ -30,14 +30,21 @@ public class FrevoXmppConfiguration {
   protected String clientPassword;
   protected boolean debug;
   protected String baseCandidateFilename;
-  protected boolean codeGenerationEnabled;
 
   /**
    * Creates a new {@code FrevoXmppConfiguration} instance with the specified parameters.
+   * 
+   * @param host                  the host
+   * @param port                  the port
+   * @param domain                the domain
+   * @param resource              the resource
+   * @param clientId              the client user id
+   * @param clientPassword        the client password
+   * @param debug                 flag to enable debugging
+   * @param baseCandidateFilename base file name to use for storing candidates after generations
    */
   public FrevoXmppConfiguration(String host, int port, String domain, String resource,
-      String clientId, String clientPassword, boolean debug, String baseCandidateFilename,
-      boolean codeGenerationEnabled) {
+      String clientId, String clientPassword, boolean debug, String baseCandidateFilename) {
     this.host = host;
     this.port = port;
     this.domain = domain;
@@ -46,7 +53,6 @@ public class FrevoXmppConfiguration {
     this.clientPassword = clientPassword;
     this.debug = debug;
     this.baseCandidateFilename = baseCandidateFilename;
-    this.codeGenerationEnabled = codeGenerationEnabled;
   }
 
   /**
@@ -121,15 +127,6 @@ public class FrevoXmppConfiguration {
     return baseCandidateFilename;
   }
 
-  /**
-   * Gets the code generation enabled flag.
-   * 
-   * @return the code generation enabled flag
-   */
-  public boolean isCodeGenerationEnabled() {
-    return codeGenerationEnabled;
-  }
-
   @Override
   public String toString() {
     var stringBuilder = new StringBuilder();
@@ -149,8 +146,6 @@ public class FrevoXmppConfiguration {
     stringBuilder.append(debug);
     stringBuilder.append(", baseCandidateFilename: ");
     stringBuilder.append(baseCandidateFilename);
-    stringBuilder.append(", codeGenerationEnabled: ");
-    stringBuilder.append(codeGenerationEnabled);
     return stringBuilder.toString();
   }
 }

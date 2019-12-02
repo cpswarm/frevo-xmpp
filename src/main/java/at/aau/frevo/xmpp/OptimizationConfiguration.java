@@ -30,8 +30,8 @@ import at.aau.frevo.Representation;
 import at.aau.frevo.RepresentationBuilder;
 import at.aau.frevo.executor.poolexecutor.PoolExecutorBuilder;
 import at.aau.frevo.method.nnga.NngaMethodBuilder;
-import at.aau.frevo.representation.fullymeshednet.FullyMeshedNetBuilder;
-import at.aau.frevo.representation.fullymeshednet.FullyMeshedNetOpBuilder;
+import at.aau.frevo.representation.parameterset.ParameterSetBuilder;
+import at.aau.frevo.representation.parameterset.ParameterSetOpBuilder;
 
 /**
  * Configuration for an {@code OptimizationTask}.
@@ -54,8 +54,8 @@ public class OptimizationConfiguration {
    */
   public OptimizationConfiguration() {
     problemBuilder = new GenericProblemBuilder();
-    representationBuilder = new FullyMeshedNetBuilder();
-    operatorBuilder = new FullyMeshedNetOpBuilder();
+    representationBuilder = new ParameterSetBuilder();
+    operatorBuilder = new ParameterSetOpBuilder();
     methodBuilder = new NngaMethodBuilder();
     executorBuilder = new PoolExecutorBuilder();
   }
@@ -158,9 +158,9 @@ public class OptimizationConfiguration {
    */
   protected static Gson createGson() {
     var representationBuilderTypeFactory = RuntimeTypeAdapterFactory.of(RepresentationBuilder.class)
-        .registerSubtype(FullyMeshedNetBuilder.class, "FullyMeshedNetBuilder");
+        .registerSubtype(ParameterSetBuilder.class, "ParameterSetBuilder");
     var operatorBuilderTypeFactory = RuntimeTypeAdapterFactory.of(OperatorBuilder.class)
-        .registerSubtype(FullyMeshedNetOpBuilder.class, "FullyMeshedNetOpBuilder");
+        .registerSubtype(ParameterSetOpBuilder.class, "ParameterSetOpBuilder");
     var methodBuilderTypeFactory = RuntimeTypeAdapterFactory.of(MethodBuilder.class)
         .registerSubtype(NngaMethodBuilder.class, "NngaMethodBuilder");
     var executorBuilderTypeFactory = RuntimeTypeAdapterFactory.of(ExecutorBuilder.class)

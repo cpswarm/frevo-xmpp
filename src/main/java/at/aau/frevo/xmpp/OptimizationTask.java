@@ -24,13 +24,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.google.gson.Gson;
 import com.google.gson.JsonSyntaxException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import at.aau.frevo.Recipe;
 import at.aau.frevo.Representation;
 import at.aau.frevo.Result;
-import at.aau.frevo.exporter.cppexporter.CppExporter;
+import at.aau.frevo.representation.parameterset.ParameterSet;
 import eu.cpswarm.optimization.messages.OptimizationCancelledMessage;
 import eu.cpswarm.optimization.messages.OptimizationProgressMessage;
 import eu.cpswarm.optimization.messages.ReplyMessage.Status;
@@ -49,7 +50,6 @@ public class OptimizationTask implements Runnable {
   protected OptimizationConfiguration optimizationConfiguration;
   protected String simulationConfiguration;
   protected Map<String, SimulationManager> simulationManagers;
-  protected CppExporter exporter;
   protected FrevoXmpp frevoXmpp;
   protected String jid;
 
@@ -64,11 +64,11 @@ public class OptimizationTask implements Runnable {
    * parameters.
    * 
    * @param id                            the id of this instance
-   * @param optimizationConfigurationJson
+   * @param optimizationConfigurationJson the optimization configuration as json
    * @param simulationConfiguration       the simulation configuration
-   * @param simulationManagerJids         the
-   * @param frevoXmpp
-   * @param jid
+   * @param simulationManagerJids         a list of jids for simulation managers
+   * @param frevoXmpp                     application instance that owns this task
+   * @param jid                           SOO jid
    */
   public OptimizationTask(String id, String optimizationConfigurationJson,
       String simulationConfiguration, List<String> simulationManagerJids, FrevoXmpp frevoXmpp,
@@ -98,8 +98,6 @@ public class OptimizationTask implements Runnable {
       simulationManagers.put(simulationManagerJid,
           new SimulationManager(simulationManagerJid, this, frevoXmpp));
     }
-
-    exporter = new CppExporter(frevoXmpp.getConfiguration().isCodeGenerationEnabled());
   }
 
   @Override
@@ -151,7 +149,8 @@ public class OptimizationTask implements Runnable {
         if ((baseCandidateFile != null) && (bestResult.getRepresentation() != null)) {
           var suffix = "_" + id + "_" + i + "_" + (int) (bestResult.getFitness()) + ".c";
           try (var writer = new PrintWriter(baseCandidateFile + suffix)) {
-            writer.println(exporter.toCode(bestResult.getRepresentation()));
+            writer.println(
+                new Gson().toJson(prepareParameterSetForTransport(bestResult.getRepresentation())));
           } catch (FileNotFoundException e) {
             LOGGER.warn("Could not write result file", e);
           }
@@ -179,17 +178,14 @@ public class OptimizationTask implements Runnable {
    * @param description the description to send
    */
   protected void sendProgress(Status status, String description) {
-    var bestFitness = 0.0;
-    var bestCandidate = "";
-
-    if (bestResult != null) {
-      bestFitness = bestResult.getFitness();
-      if (bestResult.getRepresentation() != null) {
-        bestCandidate = exporter.toCode(bestResult.getRepresentation());
-      }
+    if (bestResult == null) {
+      frevoXmpp.sendMessage(jid,
+          new OptimizationProgressMessage(id, description, status, progress, -1, null));
+      return;
     }
+
     frevoXmpp.sendMessage(jid, new OptimizationProgressMessage(id, description, status, progress,
-        bestFitness, bestCandidate));
+        bestResult.getFitness(), prepareParameterSetForTransport(bestResult.getRepresentation())));
   }
 
   /**
@@ -283,11 +279,28 @@ public class OptimizationTask implements Runnable {
   }
 
   /**
-   * Gets the exporter attached to this {@code OptimizationTask}.
+   * Prepares a {@code ParameterSet} for transport in a message.
    * 
-   * @return the exporter
+   * @param representation the {@code ParameterSet} to convert
+   * @return paramter set ready for transport
    */
-  public CppExporter getExporter() {
-    return exporter;
+  public eu.cpswarm.optimization.messages.ParameterSet prepareParameterSetForTransport(
+      Representation representation) {
+    if ((representation == null) || !(representation instanceof ParameterSet)) {
+      return null;
+    }
+
+    var parameterSet = (ParameterSet) representation;
+    var parameters = parameterSet.getParameters();
+    var values = parameterSet.getValues();
+
+    var parameterSetTransport = new eu.cpswarm.optimization.messages.ParameterSet();
+    for (int i = 0; i < values.length; i++) {
+      var p = parameters[i];
+      var v = values[i];
+      parameterSetTransport.getParameters().add(new eu.cpswarm.optimization.messages.Parameter(
+          p.getName(), p.getMetaInformation(), p.getScale() * v));
+    }
+    return parameterSetTransport;
   }
 }

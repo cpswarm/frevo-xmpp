@@ -153,7 +153,7 @@ public class FrevoXmpp implements MessageListener {
     var optimizationTask = optimizationTasks.get(message.getId());
     if (optimizationTask == null) {
       sendMessage(sourceJid,
-          new OptimizationProgressMessage(message.getId(), "Unknown ID", Status.ERROR, 0, 0, ""));
+          new OptimizationProgressMessage(message.getId(), "Unknown ID", Status.ERROR, 0, 0, null));
       return;
     }
     optimizationTask.requestProgressUpdate();

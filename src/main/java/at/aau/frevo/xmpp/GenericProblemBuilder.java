@@ -41,7 +41,7 @@ public class GenericProblemBuilder extends ProblemBuilder<GenericProblem> {
    * Constructs a new {@code XorProblemBuilder} instance by copying the properties of the specified
    * instance.
    * 
-   * @param source
+   * @param source the source builder
    */
   public GenericProblemBuilder(GenericProblemBuilder source) {
     optimizationTask = source.optimizationTask;

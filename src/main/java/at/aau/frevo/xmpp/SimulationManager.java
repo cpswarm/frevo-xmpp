@@ -84,7 +84,7 @@ public class SimulationManager {
     frevoXmpp.sendMessage(jid,
         new RunSimulationMessage(optimizationTask.getId(), null,
             optimizationTask.getNextSimulationId(), optimizationTask.getSimulationConfiguration(),
-            optimizationTask.getExporter().toCode(representation)));
+            optimizationTask.prepareParameterSetForTransport(representation)));
     try {
       // wait and block until a {@code SimulationResultMessage} arrives or timeout occurs
       latch.await(optimizationTask.getOptimizationConfiguration().getSimulationTimeoutSeconds(),
