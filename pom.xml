@@ -84,7 +84,7 @@
 		<dependency>
 			<groupId>eu.cpswarm</groupId>
 			<artifactId>optimization-messages</artifactId>
-			<version>3.0.0-bundle</version>
+			<version>0.0.2-SNAPSHOT</version>
 			<scope>compile</scope>
 		</dependency>
 
