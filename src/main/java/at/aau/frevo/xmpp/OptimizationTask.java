@@ -1,7 +1,7 @@
 /**
  * File: OptimizationTask.java
  * 
- * Copyright (C) 2019 FREVO XMPP project contributors
+ * Copyright (C) 2020 FREVO XMPP project contributors
  *
  * Universitaet Klagenfurt licenses this file to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance with the License. You may obtain a
@@ -17,233 +17,278 @@
 
 package at.aau.frevo.xmpp;
 
-import java.io.FileNotFoundException;
-import java.io.PrintWriter;
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
-import com.google.gson.Gson;
-import com.google.gson.JsonSyntaxException;
+import java.util.SplittableRandom;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import at.aau.frevo.Recipe;
-import at.aau.frevo.Representation;
+
 import at.aau.frevo.Result;
+import at.aau.frevo.method.nnga.NngaMethodBuilder;
+import at.aau.frevo.representation.parameterset.Parameter;
 import at.aau.frevo.representation.parameterset.ParameterSet;
-import eu.cpswarm.optimization.messages.OptimizationCancelledMessage;
-import eu.cpswarm.optimization.messages.OptimizationProgressMessage;
-import eu.cpswarm.optimization.messages.ReplyMessage.Status;
-import eu.cpswarm.optimization.messages.SimulationResultMessage;
+import at.aau.frevo.representation.parameterset.ParameterSetBuilder;
+import at.aau.frevo.representation.parameterset.ParameterSetOpBuilder;
+import eu.cpswarm.optimization.messages.OptimizationStatusMessage;
+import eu.cpswarm.optimization.parameters.ParameterOptimizationConfiguration;
+import eu.cpswarm.optimization.statuses.OptimizationStatusType;
+import eu.cpswarm.optimization.statuses.OptimizationTaskStatus;
 
 /**
  * Optimization task implementation.
  * <p>
- * Carries out evolution by running a {@code Recipe} on a separate thread.
+ * Carries out evolution on a separate thread.
  */
 public class OptimizationTask implements Runnable {
 
-  protected final static Logger LOGGER = LogManager.getLogger(OptimizationTask.class);
+  private static final Logger LOGGER = LogManager.getLogger(OptimizationTask.class);
 
-  protected String id;
-  protected OptimizationConfiguration optimizationConfiguration;
-  protected String simulationConfiguration;
-  protected Map<String, SimulationManager> simulationManagers;
-  protected FrevoXmpp frevoXmpp;
-  protected String jid;
+  private OptimizationManager optimizationManager;
+  private SimulationManager simulationManager;
 
-  protected volatile boolean cancelled = false;
-  protected Object progressLock = new Object();
-  protected double progress;
-  protected Result<? extends Representation> bestResult = new Result<>(null, 0);
-  protected AtomicInteger sidCounter = new AtomicInteger(0);
+  private String id;
+  private ParameterOptimizationConfiguration configuration;
+  private String simulationConfigurationId;
+
+  private OptimizationStatusMessage snapshot;
+  private OptimizationTaskStatus status;
+  private boolean cancelled = false;
+  private long finishedMillis = 0;
 
   /**
-   * Creates a new {@code OptimizationTask} instance by creating a connection with the specified
-   * parameters.
+   * Creates a new {@code OptimizationTask} instance using the specified parameters
    * 
-   * @param id                            the id of this instance
-   * @param optimizationConfigurationJson the optimization configuration as json
-   * @param simulationConfiguration       the simulation configuration
-   * @param simulationManagerJids         a list of jids for simulation managers
-   * @param frevoXmpp                     application instance that owns this task
-   * @param jid                           SOO jid
+   * @param optimizationManager       the {@code OptimizationManager} owning this task
+   * @param simulationManager         the associated {@code SimulationManager}
+   * @param id                        the id of the task
+   * @param simulationConfigurationId the simulation configuration id
+   * @param configuration             the configuration
    */
-  public OptimizationTask(String id, String optimizationConfigurationJson,
-      String simulationConfiguration, List<String> simulationManagerJids, FrevoXmpp frevoXmpp,
-      String jid) {
-    LOGGER.trace("Starting OptimizationTask: " + id + ", " + optimizationConfigurationJson + ", "
-        + simulationConfiguration + ", " + simulationManagerJids.toString());
+  public OptimizationTask(OptimizationManager optimizationManager,
+      SimulationManager simulationManager, String id, String simulationConfigurationId,
+      ParameterOptimizationConfiguration configuration) {
+    this.optimizationManager = optimizationManager;
+    this.simulationManager = simulationManager;
 
     this.id = id;
+    this.configuration = configuration;
+    this.simulationConfigurationId = simulationConfigurationId;
 
-    try {
-      optimizationConfiguration = OptimizationConfiguration.fromJson(optimizationConfigurationJson);
-      if (optimizationConfiguration == null) {
-        optimizationConfiguration = new OptimizationConfiguration();
-      }
-    } catch (JsonSyntaxException e) {
-      optimizationConfiguration = new OptimizationConfiguration();
-    }
-    LOGGER.trace("Round trip optimizationConfiguration: " + optimizationConfiguration.toJson());
-
-    this.simulationConfiguration = simulationConfiguration;
-    this.frevoXmpp = frevoXmpp;
-    this.jid = jid;
-
-    // create associated simulation manager wrappers
-    simulationManagers = Collections.synchronizedMap(new HashMap<>());
-    for (var simulationManagerJid : simulationManagerJids) {
-      simulationManagers.put(simulationManagerJid,
-          new SimulationManager(simulationManagerJid, this, frevoXmpp));
-    }
+    updateSnapshot(
+        new OptimizationStatusMessage(id, OptimizationStatusType.STARTED, -1, 0, 0, null, null));
   }
 
   @Override
   public void run() {
+    LOGGER.debug("Started running optimization {}", id);
     try {
 
-      var recipe = Recipe.forceConstruction(optimizationConfiguration.getRepresentationBuilder(),
-          optimizationConfiguration.getOperatorBuilder(),
-          optimizationConfiguration.getMethodBuilder(),
-          optimizationConfiguration.getExecutorBuilder(),
-          optimizationConfiguration.getProblemBuilder(),
-          optimizationConfiguration.getEvolutionSeed(),
-          optimizationConfiguration.getEvaluationSeed());
+      // transform parameter defintions
+      var parameterList = new ArrayList<Parameter>();
+      for (var p : configuration.getParameterDefinitions()) {
+        parameterList.add(
+            new Parameter(p.getName(), p.getMeta(), p.getMinimum(), p.getMaximum(), p.getScale()));
+      }
+      var parameters = parameterList.toArray(new Parameter[0]);
 
-      recipe.getProblemBuilder().setOptimizationTask(this);
+      var representationBuilder = new ParameterSetBuilder().setParameters(parameters)
+          .setInputCount(0).setOutputCount(parameterList.size());
 
-      // DO IT!
-      recipe.prepare(optimizationConfiguration.getCandidateCount());
-      for (var i = 0; i < optimizationConfiguration.getGenerationCount(); i++) {
+      var generationEvolutionSeed = configuration.getEvolutionSeed();
+      var generationRandom = new SplittableRandom(generationEvolutionSeed);
+      var nextGenerationEvoluationSeed = generationEvolutionSeed;
 
-        LOGGER.trace(
-            "Starting generation: " + i + " of " + optimizationConfiguration.getGenerationCount());
+      var opBuilder = new ParameterSetOpBuilder()
+          .setDirectMutationProbability(configuration.getDirectMutationProbability())
+          .setDirectMutationSeverity(configuration.getDirectMutationSeverity())
+          .setProportionalMutationProbability(configuration.getProportionalMutationProbability())
+          .setProportionalMutationSeverity(configuration.getProportionalMutationSeverity());
 
-        if (cancelled) {
-          frevoXmpp.sendMessage(jid, new OptimizationCancelledMessage(id, null, Status.OK));
+      var methodBuilder = new NngaMethodBuilder().setSkewFactor(configuration.getSkewFactor())
+          .setEliteWeight(configuration.getEliteWeight())
+          .setRandomWeight(configuration.getRandomWeight())
+          .setMutatedWeight(configuration.getMutatedWeight())
+          .setCrossedWeight(configuration.getCrossedWeight())
+          .setNewWeight(configuration.getNewWeight());
+
+      var problemBuilder = new NopProblemBuilder().setRepresentationInputCount(0)
+          .setRepresentationOutputCount(parameterList.size())
+          .setMaximumFitness(configuration.getMaximumFitness());
+
+      var executorBuilder =
+          new DeferredExecutorBuilder().setProblemVariantCount(configuration.getVariantCount())
+              .setStrict(configuration.isStrictVariantCount()).setOptimizationId(id)
+              .setSimulationConfigurationId(simulationConfigurationId)
+              .setSimulationTimeoutSeconds(configuration.getSimulationTimeoutSeconds())
+              .setTimeoutMilliSeconds((long) (configuration.getSimulationTimeoutSeconds() * 1000
+                  * configuration.getGenerationTimeoutFactor() * configuration.getCandidateCount()
+                  * configuration.getVariantCount()))
+              .setSimulationManager(simulationManager);
+
+      var executor = executorBuilder.create(problemBuilder,
+          new SplittableRandom(configuration.getEvaluationSeed()));
+
+      // copy in any candidates with a fitness value
+      List<Result<ParameterSet>> rankedCandidates = new ArrayList<Result<ParameterSet>>();
+      var otherCandidates = new ArrayList<ParameterSet>();
+      if (configuration.getCandidates() != null) {
+        for (var candidate : configuration.getCandidates()) {
+          var parameterSet = representationBuilder.create();
+          System.arraycopy(candidate.getValues(), 0, parameterSet.getValues(), 0,
+              candidate.getValues().length);
+
+          if (candidate.getFitness() >= 0) {
+            rankedCandidates.add(new Result<ParameterSet>(parameterSet, candidate.getFitness()));
+            if (rankedCandidates.size() == configuration.getCandidateCount()) {
+              break;
+            }
+          } else {
+            otherCandidates.add(parameterSet);
+          }
+        }
+      }
+
+      // fill out candidates
+      if (rankedCandidates.size() < configuration.getCandidateCount()) {
+
+        // use candidates without fitness
+        while ((rankedCandidates.size() + otherCandidates.size()) > configuration
+            .getCandidateCount()) {
+          otherCandidates.remove(otherCandidates.size() - 1);
+        }
+
+        // use random candidates
+        var operator = opBuilder.create(representationBuilder, generationRandom);
+        while ((rankedCandidates.size() + otherCandidates.size()) < configuration
+            .getCandidateCount()) {
+          otherCandidates.add(operator.operator0());
+        }
+
+        // evaluate them
+        LOGGER.trace("Setup evaluating {} candidates", otherCandidates.size());
+        rankedCandidates.addAll(executor.evaluateRepresentations(otherCandidates));
+        LOGGER.trace("Setup complete, evaluated {} candidates", rankedCandidates.size());
+      }
+
+      var generation = configuration.getGeneration();
+
+      while (true) {
+        Collections.sort(rankedCandidates);
+
+        var newConfiguration = new ParameterOptimizationConfiguration(configuration);
+        newConfiguration.setGeneration(generation);
+        newConfiguration.setEvolutionSeed(nextGenerationEvoluationSeed);
+        newConfiguration.setCandidates(Transport.toCandidateList(rankedCandidates));
+
+        var bestCandidate = rankedCandidates.get(0);
+
+        // check for stop condition
+        var statusType = OptimizationStatusType.RUNNING;
+        if ((generation == configuration.getMaximumGeneration())
+            || (bestCandidate.getFitness() >= configuration.getMaximumFitness())) {
+          statusType = OptimizationStatusType.COMPLETE;
+        } else if (configuration.getCandidateCount() != rankedCandidates.size()) {
+          statusType = OptimizationStatusType.ERROR;
+        } else if (isCancelled()) {
+          statusType = OptimizationStatusType.CANCELLED;
+        }
+
+        updateSnapshot(new OptimizationStatusMessage(id, statusType, bestCandidate.getFitness(),
+            generation, configuration.getMaximumGeneration(),
+            Transport.toParameterList(bestCandidate.getRepresentation()), newConfiguration));
+
+        // stop condition
+        if (statusType != OptimizationStatusType.RUNNING) {
           break;
         }
 
-        // optimize through one generation
-        var results = recipe.run(1);
-        var result = results.get(0);
+        generationRandom = new SplittableRandom(nextGenerationEvoluationSeed);
+        nextGenerationEvoluationSeed = generationRandom.nextLong();
+        var operator = opBuilder.create(representationBuilder, generationRandom);
+        var method = methodBuilder.create(rankedCandidates, operator, executor, generationRandom);
 
-        // update progress
-        synchronized (progressLock) {
+        // evolve a one generation and flush work queue
+        rankedCandidates = method.run(1);
+        simulationManager.cancelWorkByTask(this);
 
-          if (result.getFitness() > bestResult.getFitness()) {
-            bestResult = result;
-          }
-
-          if (result.getFitness() >= recipe.getProblemBuilder().getMaximumFitness()) {
-            progress = 100;
-            break;
-          }
-          progress = 100.0 * i / optimizationConfiguration.getGenerationCount();
-        }
-
-        // optionally dump top result to c file
-        var baseCandidateFile = frevoXmpp.getConfiguration().getBaseCandidateFilename();
-        if ((baseCandidateFile != null) && (bestResult.getRepresentation() != null)) {
-          var suffix = "_" + id + "_" + i + "_" + (int) (bestResult.getFitness()) + ".c";
-          try (var writer = new PrintWriter(baseCandidateFile + suffix)) {
-            writer.println(
-                new Gson().toJson(prepareParameterSetForTransport(bestResult.getRepresentation())));
-          } catch (FileNotFoundException e) {
-            LOGGER.warn("Could not write result file", e);
-          }
-        }
+        LOGGER.debug("Optimization {}: completed generation {}", id, generation);
+        generation++;
       }
 
-      // send final progress
-      synchronized (progressLock) {
-        progress = 100;
-        sendProgress(Status.OK, null);
-      }
-      LOGGER.trace("Optimization complete");
     } catch (Exception e) {
-      LOGGER.error("An exception occurred while optimizing", e);
-      sendProgress(Status.ERROR, e.toString());
-    } finally {
-      frevoXmpp.getOptimizationTasks().remove(this.id);
+      LOGGER.error("Optimization {}: {}", id, e);
+      updateSnapshot(new OptimizationStatusMessage(id, OptimizationStatusType.ERROR,
+          snapshot.getBestFitness(), snapshot.getGeneration(), configuration.getMaximumGeneration(),
+          snapshot.getBestParameters(), snapshot.getConfiguration()));
     }
+
+    synchronized (this) {
+      finishedMillis = System.currentTimeMillis();
+    }
+    LOGGER.debug("Optimization {}: finished", id);
   }
 
   /**
-   * Helper method to send back progress.
+   * Updates the snapshot of this optimization task. This propagated to the status of the task and
+   * ultimately to the status of the optimization tool.
    * 
-   * @param status      the status to send
-   * @param description the description to send
+   * @param snapshot the new snapshot
    */
-  protected void sendProgress(Status status, String description) {
-    if (bestResult == null) {
-      frevoXmpp.sendMessage(jid,
-          new OptimizationProgressMessage(id, description, status, progress, -1, null));
-      return;
-    }
-
-    frevoXmpp.sendMessage(jid, new OptimizationProgressMessage(id, description, status, progress,
-        bestResult.getFitness(), prepareParameterSetForTransport(bestResult.getRepresentation())));
+  protected synchronized void updateSnapshot(OptimizationStatusMessage snapshot) {
+    this.snapshot = snapshot;
+    status = new OptimizationTaskStatus(snapshot.getOptimizationId(), snapshot.getStatusType(),
+        snapshot.getBestFitness(), snapshot.getGeneration(), snapshot.getMaximumGenerations());
+    optimizationManager.updateStatus();
   }
 
   /**
-   * Cancels the {@code OptimizationTask}.
+   * Gets the status of the optimization task.
+   * 
+   * @return the status
    */
-  public void cancel() {
+  public synchronized OptimizationTaskStatus getStatus() {
+    return status;
+  }
+
+  /**
+   * Gets the snapshot of the optimization task.
+   * 
+   * @return the snapshot
+   */
+  public synchronized OptimizationStatusMessage getSnapshot() {
+    return snapshot;
+  }
+
+  /**
+   * Cancels the optimization task.
+   */
+  public synchronized void cancel() {
     cancelled = true;
+    simulationManager.cancelWorkByTask(this);
   }
 
   /**
-   * Requests that the {@code OptimizationTask} sends an {@code OptimizationProgressMessage}.
-   */
-  public void requestProgressUpdate() {
-    synchronized (progressLock) {
-      sendProgress(Status.OK, null);
-    }
-  }
-
-  /**
-   * Tests a candidate by sending out a {@code RunSimulationMessage}.
+   * Gets the cancellation flag.
    * 
-   * @param candidate the candidate representaiton to test
-   * @return the fitness value
+   * @return the cancellation flag
    */
-  public double evaluateRepresentation(Representation candidate) {
-    while (true) {
-      // try to aquire a SimulationManager and evaluate the Representation
-      for (var simulationManager : simulationManagers.values()) {
-        if (simulationManager.tryAcquire()) {
-          return simulationManager.evaluateRepresentation(candidate);
-        }
-      }
-
-      // wait before retrying
-      try {
-        Thread.sleep(100);
-      } catch (InterruptedException e) {
-        LOGGER.trace("Interrupted while evaluating representation ", e);
-        return 0;
-      }
-    }
+  public synchronized boolean isCancelled() {
+    return cancelled;
   }
 
   /**
-   * Handles a incoming {@code SimulationResultMessage}.
+   * Gets the timestamp of when the optimization task finished.
    * 
-   * @param message the incoming message
-   * @param jid     the used to route the message
+   * @return the finished timestamp
    */
-  public void handleSimulationResultMessage(SimulationResultMessage message, String jid) {
-    var simulationManager = simulationManagers.get(jid);
-    if (simulationManager != null) {
-      simulationManager.handleSimulationResultMessage(message);
-    }
+  public synchronized long getFinishedMillis() {
+    return finishedMillis;
   }
 
   /**
-   * Gets the id of this {@code OptimizationTask}.
+   * Gets the id of the optimization task.
    * 
    * @return the id
    */
@@ -251,56 +296,21 @@ public class OptimizationTask implements Runnable {
     return id;
   }
 
-  /***
-   * Gets the optimization configuration for this {@code OptimizationTask}.
+  /**
+   * Gets the simulation configuration id of the optimization task.
    * 
-   * @return the optimization configuration
+   * @return the simulation configuration id
    */
-  public OptimizationConfiguration getOptimizationConfiguration() {
-    return optimizationConfiguration;
+  public String getSimulationConfigurationId() {
+    return simulationConfigurationId;
   }
 
   /**
-   * Gets the simulation configuration for this {@code OptimizationTask}.
+   * Gets the configuration of the optimization task.
    * 
-   * @return the simulation configuration
+   * @return the configuration
    */
-  public String getSimulationConfiguration() {
-    return simulationConfiguration;
-  }
-
-  /**
-   * Gets the next simulation id for this {@code OptimizationTask}.
-   * 
-   * @return the next simulation id to use
-   */
-  public String getNextSimulationId() {
-    return Integer.toString(sidCounter.getAndIncrement());
-  }
-
-  /**
-   * Prepares a {@code ParameterSet} for transport in a message.
-   * 
-   * @param representation the {@code ParameterSet} to convert
-   * @return paramter set ready for transport
-   */
-  public eu.cpswarm.optimization.messages.ParameterSet prepareParameterSetForTransport(
-      Representation representation) {
-    if ((representation == null) || !(representation instanceof ParameterSet)) {
-      return null;
-    }
-
-    var parameterSet = (ParameterSet) representation;
-    var parameters = parameterSet.getParameters();
-    var values = parameterSet.getValues();
-
-    var parameterSetTransport = new eu.cpswarm.optimization.messages.ParameterSet();
-    for (int i = 0; i < values.length; i++) {
-      var p = parameters[i];
-      var v = values[i];
-      parameterSetTransport.getParameters().add(new eu.cpswarm.optimization.messages.Parameter(
-          p.getName(), p.getMetaInformation(), p.getScale() * v));
-    }
-    return parameterSetTransport;
+  public ParameterOptimizationConfiguration getConfiguration() {
+    return configuration;
   }
 }

@@ -10,6 +10,8 @@ The development of FREVO is managed by [Universität Klagenfurt](https://www.aau
 ### Prerequisites
 This project builds with Maven and targets Java 10.
 
+To build this component, install the corresponding branches of the [frevo-next](https://github.com/cpswarm/frevo-next) and [optimization-messages](https://github.com/cpswarm/optimization-messages) components.
+
 ### Build
 
 ```

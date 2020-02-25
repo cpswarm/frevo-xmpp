@@ -1,7 +1,7 @@
 /**
- * File: GenericProblem.java
+ * File: NopProblem.java
  * 
- * Copyright (C) 2019 FREVO XMPP project contributors
+ * Copyright (C) 2020 FREVO XMPP project contributors
  *
  * Universitaet Klagenfurt licenses this file to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance with the License. You may obtain a
@@ -17,35 +17,28 @@
 
 package at.aau.frevo.xmpp;
 
-import java.util.SplittableRandom;
 import at.aau.frevo.Problem;
 import at.aau.frevo.Representation;
 
 /**
- * Generic problem that delegates evaulation to a remote simulation manager.
+ * Problem that performs no operation and always returns a fitness of 0.
+ * <p>
+ * This is used as a place holder to allow the actual evaluation to be deferred.
  */
-public class GenericProblem extends Problem {
-
-  protected OptimizationTask optimizationTask;
+public class NopProblem extends Problem {
 
   /**
-   * Creates a new {@code GenericProblem} instance with the specified configuration.
+   * Creates a new {@code NopProblem} instance with the specified configuration.
    * 
-   * @param builder the {@code GenericProblemBuilder} used for configuration
-   * @param random  the random number generator to use
+   * @param builder the {@code NopProblemBuilder} used for configuration
+   * @param seed    the seed to use
    */
-  public GenericProblem(GenericProblemBuilder builder, SplittableRandom random) {
-    super(random);
-    optimizationTask = builder.getOptimizationTask();
+  public NopProblem(NopProblemBuilder builder, long seed) {
+    super(seed);
   }
 
   @Override
   public double evaluateRepresentation(Representation representation) {
-
-    // TODO: transfer seed for random number generator
-    if (optimizationTask != null) {
-      return optimizationTask.evaluateRepresentation(representation);
-    }
     return 0;
   }
 }

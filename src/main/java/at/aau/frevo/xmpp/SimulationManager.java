@@ -1,7 +1,7 @@
 /**
  * File: SimulationManager.java
  * 
- * Copyright (C) 2019 FREVO XMPP project contributors
+ * Copyright (C) 2020 FREVO XMPP project contributors
  *
  * Universitaet Klagenfurt licenses this file to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance with the License. You may obtain a
@@ -17,98 +17,104 @@
 
 package at.aau.frevo.xmpp;
 
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import at.aau.frevo.Representation;
-import eu.cpswarm.optimization.messages.RunSimulationMessage;
-import eu.cpswarm.optimization.messages.SimulationResultMessage;
 
 /**
- * Local representation of a remote simulation manager.
+ * Manager of connections to remote simulation managers.
  */
-public class SimulationManager {
+public class SimulationManager implements Runnable {
 
-  protected final static Logger LOGGER = LogManager.getLogger(SimulationManager.class);
+  private static final Logger LOGGER = LogManager.getLogger(SimulationManager.class);
 
-  protected String jid;
-  protected OptimizationTask optimizationTask;
-  protected FrevoXmpp frevoXmpp;
+  private static final long SLEEP_MILLIS = 1000;
 
-  protected boolean busy;
-  protected double fitnessValue;
-  protected CountDownLatch latch;
+  private List<SmContact> contacts = new ArrayList<>();
+  private Map<String, LinkedList<WorkItem>> workByScid = new HashMap<>();
 
-  /**
-   * Creates a new {@code SimulationManager} instance.
-   * 
-   * @param jid              the JID of the remote simulation manager
-   * @param optimizationTask the {@code OptimizationTask} associated with this
-   *                         {@code SimulationManager}
-   * @param frevoXmpp        the {@code FrevoXmpp} associated with this {@code SimulationManager}
-   */
-  public SimulationManager(String jid, OptimizationTask optimizationTask, FrevoXmpp frevoXmpp) {
-    this.jid = jid;
-    this.optimizationTask = optimizationTask;
-    this.frevoXmpp = frevoXmpp;
-    busy = false;
-  }
-
-  /**
-   * Tries to acquire this {@code SimulationManager} for evaluating a {@code Representation}.
-   * 
-   * @return {@code true} if successfully acquired, otherwise {@code false}
-   */
-  public synchronized boolean tryAcquire() {
-    if (busy) {
-      return false;
-    }
-    busy = true;
-    fitnessValue = 0;
-    return true;
-  }
-
-  /**
-   * Evaluates a {@code Representation}.
-   * <p>
-   * Sends a {@code RunSimulationMessage} and awaits a {@code SimulationResultMessage}.
-   * 
-   * @param representation the {@code Representation} to evaluate
-   * @return the fitness value
-   */
-  public double evaluateRepresentation(Representation representation) {
-    latch = new CountDownLatch(1);
-    LOGGER.trace("Running simulation on: " + jid);
-
-    frevoXmpp.sendMessage(jid,
-        new RunSimulationMessage(optimizationTask.getId(), null,
-            optimizationTask.getNextSimulationId(), optimizationTask.getSimulationConfiguration(),
-            optimizationTask.prepareParameterSetForTransport(representation)));
+  @Override
+  public void run() {
+    LOGGER.debug("Running");
     try {
-      // wait and block until a {@code SimulationResultMessage} arrives or timeout occurs
-      latch.await(optimizationTask.getOptimizationConfiguration().getSimulationTimeoutSeconds(),
-          TimeUnit.SECONDS);
-    } catch (InterruptedException e) {
-      LOGGER.trace("Simulation timed out", e);
-    }
+      while (true) {
+        synchronized (contacts) {
+          // for all free simulation managers
+          for (var contact : contacts) {
+            if (contact.isFree()) {
 
-    synchronized (this) {
-      LOGGER.trace("Simulation complete on: " + jid + ", fitness=" + fitnessValue);
-      busy = false;
-      return fitnessValue;
+              // try to find work
+              WorkItem workItem = null;
+              synchronized (workByScid) {
+                var list = workByScid.get(contact.getSimulationConfigurationId());
+                if (list != null) {
+                  workItem = list.poll();
+                }
+              }
+              if (workItem != null) {
+                if (!contact.runSimulation(workItem)) {
+                  addWork(workItem);
+                }
+              }
+            }
+          }
+        }
+        // TODO: remove busy wait?
+        Thread.sleep(SLEEP_MILLIS);
+      }
+    } catch (Exception e) {
+      LOGGER.error("Exception: ", e);
     }
   }
 
   /**
-   * Handles a {@code SimulationResultMessage} by signalling the waiting thread.
+   * Adds a contact to the simulation manager.
    * 
-   * @param message the {@code SimulationResultMessage}
+   * @param contact the contact to add
    */
-  public synchronized void handleSimulationResultMessage(SimulationResultMessage message) {
-    if (busy) {
-      fitnessValue = message.getFitnessValue();
-      latch.countDown();
+  public void addContact(SmContact contact) {
+    synchronized (contacts) {
+      contacts.add(contact);
+    }
+  }
+
+  /**
+   * Adds a work item to the appropriate queue to be executed when a simulation manager becomes
+   * available.
+   * 
+   * @param workItem the work item to add
+   */
+  public void addWork(WorkItem workItem) {
+    synchronized (workByScid) {
+      var list = workByScid.get(workItem.getSimulationConfigurationId());
+      if (list == null) {
+        list = new LinkedList<>();
+        workByScid.put(workItem.getSimulationConfigurationId(), list);
+      }
+      list.add(workItem);
+    }
+  }
+
+  /**
+   * Cancels all work items associated with an {@code OptimizationTask}.
+   * 
+   * @param task the {@code OptimizationTask}
+   */
+  public void cancelWorkByTask(OptimizationTask task) {
+    var optimizationId = task.getId();
+    synchronized (workByScid) {
+      var list = workByScid.get(task.getSimulationConfigurationId());
+      if (list != null) {
+        // clear and remove all work assosciated with the optimizationId
+        list.stream().filter(w -> w.getOptimizationId() == optimizationId)
+            .forEach(w -> w.markComplete());
+        list.removeIf(j -> j.getOptimizationId() == optimizationId);
+      }
     }
   }
 }
